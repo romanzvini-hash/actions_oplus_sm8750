@@ -1,0 +1,607 @@
+
+
+
+name: ReSukiSU OP13 Build by skinga69
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-6.6.142
+  cancel-in-progress: true
+
+env:
+  TZ: Asia/Shanghai
+  ANDROID_VERSION: 'android15'
+  KERNEL_VERSION: '6.6'
+  KERNEL_NAME: 'android15-8-g29d86c5fc9dd-abogki428889875-4k'
+  CCACHE_KEY: ccache-neov4-6.6.142
+
+on:
+  workflow_dispatch:
+    inputs:
+      SUSFS:
+        description: 'Enable SuSFS (Enhances hide environment)'
+        required: true
+        type: boolean
+        default: true
+      lz4_enable:
+        description: 'Install LZ4 1.10.0 + ZSTD 1.5.7 Patch'
+        required: true
+        type: boolean
+        default: true
+      lz4kd_enable:
+        description: 'Install LZ4KD Patch (ZRAM optimization)'
+        required: true
+        type: boolean
+        default: false
+      bbr_enable:
+        description: "Enable TCP BBR/Brutal (false=off, true=add, default=set as default)"
+        required: true
+        type: choice
+        default: 'true'
+        options:
+          - 'false'
+          - 'true'
+          - 'default'
+      adios_enable:
+        description: 'Enable ADIOS IO Scheduler (Improves IO read/write performance)'
+        required: true
+        type: boolean
+        default: true
+      rekernel_enable:
+        description: 'Enable Re-Kernel Support (Enhances app freezing via NoActive/Freezer)'
+        required: true
+        type: boolean
+        default: false
+      baseband_guard:
+        description: 'Enable Baseband Guard (Anti-brick modem protection)'
+        required: true
+        type: boolean
+        default: true
+      lto_type:
+        description: 'LTO Optimization (none = fast compile, thin = default, full = slow)'
+        required: true
+        type: choice
+        default: 'thin'
+        options:
+          - 'none'
+          - 'thin'
+          - 'full'
+      fengchi:
+        description: 'Enable Fengchi / HMBIRD Optimization'
+        required: true
+        type: boolean
+        default: true
+      bore_enable:
+        description: 'Enable BORE Scheduler (Burst-Oriented Response Enhancer, off by default)'
+        required: true
+        type: boolean
+        default: false
+      zram_writeback:
+        description: 'Enable ZRAM Writeback (better memory management)'
+        required: true
+        type: boolean
+        default: false
+      schedutil_opt:
+        description: 'Enable SchedUtil optimizations (better CPU governor)'
+        required: true
+        type: boolean
+        default: false
+      cpu_opt:
+        description: 'CPU Optimizations (Oryon MCPU tuning for SM8750)'
+        required: true
+        type: boolean
+        default: true
+      f2fs_opt:
+        description: 'F2FS Optimizations (better flash storage performance)'
+        required: true
+        type: boolean
+        default: false
+      wireguard:
+        description: 'Enable WireGuard VPN support'
+        required: true
+        type: boolean
+        default: true
+      netfilter_full:
+        description: 'Full Netfilter (conntrack, NAT, hashlimit)'
+        required: true
+        type: boolean
+        default: false
+      lrng_enable:
+        description: 'Enable LRNG v59 (better entropy for crypto/gaming)'
+        required: true
+        type: boolean
+        default: false
+      wakelock_blocker:
+        description: 'Enable Wakelock Blocker (better idle battery drain)'
+        required: true
+        type: boolean
+        default: true
+      github_release:
+        description: 'Create GitHub Release'
+        required: true
+        type: boolean
+        default: false
+      ntsync_enable:
+        description: 'Enable NTSync (low-latency NT sync primitives, great for gaming/Wine)'
+        required: true
+        type: boolean
+        default: false
+      droidspaces_enable:
+        description: 'Enable Droidspaces (SYSVIPC + PID_NS + POSIX_MQUEUE for proot-distro)'
+        required: true
+        type: boolean
+        default: true
+      ip_set_enable:
+        description: 'Enable IP_SET + IPv6 NAT (advanced firewall + IPv6 masquerade)'
+        required: true
+        type: boolean
+        default: false
+      ttl_enable:
+        description: 'Enable TTL/HL Target (hide tethering from carrier detection)'
+        required: true
+        type: boolean
+        default: false
+      mem_opt_patches:
+        description: 'Enable memory/scheduler optimization patches (from WildKernels)'
+        required: true
+        type: boolean
+        default: true
+        
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      ksuver: ${{ steps.ksu_version.outputs.ksuver }}
+      ak3name: ${{ steps.create_zip.outputs.ak3name }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: 🧠 Add swap space (for LTO link)
+        run: |
+          sudo fallocate -l 16G /mnt/swap_lto || sudo dd if=/dev/zero of=/mnt/swap_lto bs=1M count=16384
+          sudo chmod 600 /mnt/swap_lto
+          sudo mkswap /mnt/swap_lto
+          sudo swapon /mnt/swap_lto
+          echo "── swap after ──"; free -h
+      - name: Cache Clang
+        id: clang-cache
+        uses: actions/cache@v4
+        with:
+          path: kernel_workspace/zyc-clang
+          key: zyc-clang-19.0.0git-20240723-forcemiss-test1
+
+      - name: Cache build-tools
+        id: buildtools-cache
+        uses: actions/cache@v4
+        with:
+          path: kernel_workspace/build-tools
+          key: codelinaro-build-tools-ks-kernel-lnx-4.0-forcemiss-test1
+
+      - name: Install dependencies & Init Source
+        run: |
+          echo "Relocating heavy folders for background deletion..."
+          sudo mv /usr/share/dotnet /usr/share/dotnet_trash 2>/dev/null || true
+          sudo mv /usr/local/lib/android /usr/local/lib/android_trash 2>/dev/null || true
+          sudo mv /opt/ghc /opt/ghc_trash 2>/dev/null || true
+          sudo mv /usr/lib/jvm /usr/lib/jvm_trash 2>/dev/null || true
+          (sudo nice -n 19 ionice -c 3 rm -rf /usr/share/dotnet_trash /usr/local/lib/android_trash /opt/ghc_trash /usr/lib/jvm_trash) &
+          rm -rf kernel_workspace/common kernel_workspace/out 2>/dev/null || true
+          mkdir -p kernel_workspace/zyc-clang kernel_workspace/build-tools
+          cd kernel_workspace
+          # apt — stripped to bare minimum, no purge/man-db waste
+          sudo apt-get install -y --no-install-recommends -o Dpkg::Use-Pty=0 \
+            libelf-dev dos2unix pahole cmake &
+          # Source clone
+          echo "Cloning source repository..."
+          curl -L https://github.com/romanzvini-hash/android_kernel_common_oneplus_sm8750/archive/refs/heads/6.6.142_oneplus13_coloros16.zip \
+            -o common.zip &&
+          unzip -q common.zip &&
+          mv android_kernel_common_oneplus_sm8750-* common &&
+          rm -f common.zip &
+          # Clang — only download if cache missed
+          if [ "${{ steps.clang-cache.outputs.cache-hit }}" != "true" ]; then
+            echo "Cache miss — downloading ZyCromerZ Clang 19..."
+            mkdir -p zyc-clang
+            aria2c -x16 -s16 -k1M -j16 --retry-wait=5 --max-tries=10 \
+              -d /tmp -o zyc-clang.tar.gz \
+              "https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz"
+            tar -C zyc-clang -zxf /tmp/zyc-clang.tar.gz
+            rm -f /tmp/zyc-clang.tar.gz
+          else
+            echo "Clang restored from cache, skipping download."
+          fi &
+          # build-tools — only clone if cache missed
+          if [ "${{ steps.buildtools-cache.outputs.cache-hit }}" != "true" ]; then
+            echo "Cache miss — cloning build-tools..."
+            git clone --depth=1 -b ks-kernel.lnx.4.0.r1-rel \
+              https://git.codelinaro.org/clo/la/kernel/prebuilts/build-tools.git build-tools
+          else
+            echo "build-tools restored from cache, skipping clone."
+          fi &
+          wait
+          echo "Removing ABI protection & dirty suffix..."
+          rm common/android/abi_gki_protected_exports_* || true
+          for f in common/scripts/setlocalversion; do
+            sed -i 's/ -dirty//g' "$f"
+            sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' "$f"
+          done
+          find kernel_workspace -exec touch {} + 2>/dev/null || true
+          echo "Source and tools initialized successfully!"
+      - name: Cache ccache-ECS binary
+        uses: actions/cache@v4
+        id: ecs-cache
+        with:
+          path: /tmp/ccache-ecs-bin
+          key: ccache-ecs-${{ runner.os }}-084a7620-forcemiss-test1
+
+      - name: Build & Install ccache-ECS
+        run: |
+          if [ -f /tmp/ccache-ecs-bin/ccache ]; then
+            echo "ECS binary cached, skipping build"
+            sudo cp /tmp/ccache-ecs-bin/ccache /usr/local/bin/ccache
+          else
+            sudo apt-get install -y --no-install-recommends cmake
+            git clone --depth=1 https://github.com/cctv18/ccache-ECS.git /tmp/ccache-ecs
+            cd /tmp/ccache-ecs
+            ./ci/build-binary
+            mkdir -p /tmp/ccache-ecs-bin
+            cp install/ccache /tmp/ccache-ecs-bin/ccache
+            sudo cp /tmp/ccache-ecs-bin/ccache /usr/local/bin/ccache
+          fi
+          sudo chmod 755 /usr/local/bin/ccache
+          echo "/usr/local/bin" >> $GITHUB_PATH
+          echo "✅ ECS ccache: $(/usr/local/bin/ccache --version | head -1)"
+      - name: Save ccache-ECS binary cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: /tmp/ccache-ecs-bin
+          key: ccache-ecs-${{ runner.os }}-084a7620-forcemiss-test1
+
+      - name: Configure CCache Directory
+        run: |
+          echo "CCACHE_DIR=$HOME/.ccache_6.6.142" >> $GITHUB_ENV
+          echo "LDCACHE_DIR=$GITHUB_WORKSPACE/ldcache_6.6.142" >> $GITHUB_ENV
+          mkdir -p $GITHUB_WORKSPACE/ldcache_6.6.142
+          echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
+          echo "Current Disk Space:"
+          df -h
+          echo "Current Build Kernel Version: 6.6.142"
+      - name: Restore CCache
+        uses: actions/cache/restore@v4
+        id: ccache-restore
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-forcemiss-test1
+          restore-keys: |
+            ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }}-
+            ${{ env.CCACHE_KEY }}-${{ runner.os }}-
+            ${{ env.CCACHE_KEY }}-
+      - name: Restore LTO Cache
+        uses: actions/cache/restore@v4
+        if: inputs.lto_type == 'thin'
+        with:
+          path: ${{ env.LDCACHE_DIR }}
+          key: lto-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-forcemiss-test1
+          restore-keys: |
+            lto-cache-${{ runner.os }}-${{ github.ref_name }}-
+      - name: Pull Public CCache
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Checking local cache status..."
+          if [ -d "${{ env.CCACHE_DIR }}" ] && [ "$(ls -A ${{ env.CCACHE_DIR }} 2>/dev/null)" ]; then
+            echo "Local cache loaded successfully, skipping public cache pull!"
+            exit 0
+          fi
+          
+          echo "Cache miss, attempting to pull public ccache..."
+          mkdir -p ${{ env.CCACHE_DIR }}
+          FILE_NAME="ccache-6.6.142.tar.zst"
+          
+          if gh release download -p "$FILE_NAME" -R cctv18/public_ccache; then
+            echo "Successfully downloaded $FILE_NAME, extracting..."
+            tar -I zstd -xf "$FILE_NAME" -C ${{ env.CCACHE_DIR }}
+            echo "Public ccache restored successfully!"
+          else
+            echo "Public ccache not found, proceeding with full clean build..."
+          fi
+      
+      - name: Init and Config CCache
+        run: |
+          export CCACHE_DIR="${{ env.CCACHE_DIR }}"
+          mkdir -p "$CCACHE_DIR"
+          ccache -M "${{ env.CCACHE_MAXSIZE }}"
+          ccache -o compression=true
+          ccache -o compiler_check=none
+          ccache -o hash_dir=false
+          ccache -o direct_mode=true
+          ccache -o depend_mode=false
+          ccache -o base_dir="${{ github.workspace }}"
+          ccache -o sloppiness=file_stat_matches,include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros,locale
+          echo "Initial CCache status:"
+          ccache -s
+          echo "Updating atime to achieve cache eviction..."
+          find "${{ env.CCACHE_DIR }}" -type f -exec touch -t $(date -d "1 day ago" +%Y%m%d%H%M) {} + || true
+              
+      - name: ⚡ Setup ReSukiSU
+        run: |
+          cd kernel_workspace/common
+          echo "🛠️ Setting up ReSukiSU (main)..."
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s main
+          cd KernelSU
+          KSU_VERSION_COUNT=$(git rev-list --count HEAD)
+          export KSUVER=$(expr $KSU_VERSION_COUNT + 37185)
+          echo "KSUVER=$KSUVER" >> $GITHUB_ENV
+          echo "✅ ReSukiSU $(git rev-parse --short HEAD) (ver $KSUVER)"
+      - name: 🔧 Setup Patches
+        run: |
+          cd kernel_workspace
+          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
+            git clone --depth=1 -b gki-android15-6.6 https://gitlab.com/simonpunk/susfs4ksu.git &
+          fi
+          git clone --depth=1 https://github.com/mrcxlinux/kernel_patches.git &
+          git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git &
+          git clone --depth=1 https://github.com/palazik/kernel_patches.git wildkernels_patches &
+          wait
+          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
+            cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch ./common/
+            cp susfs4ksu/kernel_patches/fs/* ./common/fs/
+            cp susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+          fi
+          cd ./common
+          cp ../kernel_patches/common/EnablePOLLY.patch ./
+          git apply -p1 < EnablePOLLY.patch || true
+          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
+            echo "📦 Pre-patch fixups (fatalcoder android15-6.6 method)..."
+            if ! grep -qxF $'\tunsigned int nr_subpages = __PAGE_SIZE / PAGE_SIZE;' ./fs/proc/task_mmu.c; then
+              sed -i -e '/int ret = 0, copied = 0;/a \\tunsigned int nr_subpages \= __PAGE_SIZE \/ PAGE_SIZE;' \
+                     -e '/int ret = 0, copied = 0;/a \\tpagemap_entry_t \*res = NULL;' ./fs/proc/task_mmu.c
+            fi
+            if ! grep -qxF '#include <linux/dma-buf.h>' ./fs/proc/base.c; then
+              sed -i '/#include <linux\/cpufreq_times.h>/a #include <linux\/dma-buf.h>' ./fs/proc/base.c
+            fi
+            if ! grep -qxF '#include <linux/zswap.h>' ./mm/memory.c; then
+              sed -i '/#include <linux\/sched\/sysctl\.h>/a #include <linux\/zswap.h>' ./mm/memory.c
+            fi
+            if grep -qF 'if (vma->vm_end > last_vma_end)' ./fs/proc/task_mmu.c \
+               && ! grep -qF 'if (vma->vm_end > last_vma_end) {' ./fs/proc/task_mmu.c; then
+              perl -i -0pe 's/\t\t\tif \(vma->vm_end > last_vma_end\)\n\t\t\t\tsmap_gather_stats\(vma, &mss, last_vma_end\);/\t\t\tif (vma->vm_end > last_vma_end) {\n\t\t\t\tsmap_gather_stats(vma, \&mss, last_vma_end);\n\t\t\t\tlast_vma_end = vma->vm_end;\n\t\t\t}/' ./fs/proc/task_mmu.c
+            fi
+            echo "📦 Applying 50_ with --forward (by-design rejects skip cleanly)..."
+            patch -p1 --forward < 50_add_susfs_in_gki-android15-6.6.patch || true
+            grep -q "SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file))" fs/proc/task_mmu.c \
+              || { echo "❌ SUS_MAP guard missing — real failure"; exit 1; }
+            echo "✅ SUSFS applied (fatalcoder method)"
+          fi
+          echo "✅ Base patches applied"
+      - name: ⚙️ Configure Kernel Options
+        run: |
+          cd kernel_workspace
+          DEFCONFIG="./common/arch/arm64/configs/gki_defconfig"
+          echo "CONFIG_KSU=y" >> "$DEFCONFIG"
+          echo "CONFIG_TMPFS_XATTR=y" >> "$DEFCONFIG"
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> "$DEFCONFIG"
+      
+          if [[ "${{ github.event.inputs.lz4kd_enable }}" == "true" ]]; then
+            echo "CONFIG_ZSMALLOC=y" >> "$DEFCONFIG"
+            echo "CONFIG_CRYPTO_LZ4HC=y" >> "$DEFCONFIG"
+            echo "CONFIG_CRYPTO_LZ4K=y" >> "$DEFCONFIG"
+            echo "CONFIG_CRYPTO_LZ4KD=y" >> "$DEFCONFIG"
+            echo "CONFIG_CRYPTO_842=y" >> "$DEFCONFIG"
+          fi
+      
+          echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> "$DEFCONFIG"
+          sed -i 's/check_defconfig//' ./common/build.config.gki
+          echo "CONFIG_HEADERS_INSTALL=n" >> "$DEFCONFIG"
+      
+          echo "CONFIG_LLVM_POLLY=y" >> "$DEFCONFIG"
+          echo "CONFIG_LD_DEAD_CODE_DATA_ELIMINATION=y" >> "$DEFCONFIG"
+      
+          echo 'CONFIG_KSU_FULL_NAME_FORMAT="v%KSU_VERSION%-%COMMIT_SHA%@palaziks"' >> "$DEFCONFIG"
+      
+          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
+            echo "📦 Enabling SUSFS features..."
+            echo "CONFIG_KSU_SUSFS=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> "$DEFCONFIG"
+            echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> "$DEFCONFIG"
+          fi
+
+      - name: Apply LZ4 1.10.0 & ZSTD 1.5.7 Patches
+        if: inputs.lz4_enable
+        run: |
+          echo "Adding LZ4 & ZSTD patches..."
+          cd kernel_workspace/common
+          mkdir -p lib/lz4/lz4armv8
+          cp ../kernel_patches/zram/001-lz4.patch ./
+          cp ../kernel_patches/zram/lz4armv8.S lib/lz4/lz4armv8.S
+          cp ../kernel_patches/zram/lz4armv8.S lib/lz4/lz4armv8/lz4armv8.S
+          cp ../kernel_patches/zram/002-zstd.patch ./
+          git apply -p1 < 001-lz4.patch || echo "LZ4 Patch failed or already applied"
+          patch -p1 < 002-zstd.patch || echo "ZSTD Patch failed or already applied"
+      - name: Apply LZ4KD Patch
+        if: inputs.lz4kd_enable
+        run: |
+          echo "Adding LZ4KD patch..."
+          cd kernel_workspace/common
+          cp -r ../SukiSU_patch/other/zram/lz4k/include/linux/* ./include/linux/
+          cp -r ../SukiSU_patch/other/zram/lz4k/lib/* ./lib
+          cp -r ../SukiSU_patch/other/zram/lz4k/crypto/* ./crypto
+          cp ../SukiSU_patch/other/zram/zram_patch/${{ env.KERNEL_VERSION }}/lz4kd.patch ./
+          patch -p1 -F 3 < lz4kd.patch || true
+      - name: Configure ZRAM Writeback
+        if: inputs.zram_writeback
+        working-directory: kernel_workspace
+        run: |
+          echo "Enabling ZRAM Writeback support..."
+          cat >> common/arch/arm64/configs/gki_defconfig << 'EOF'
+          CONFIG_ZRAM_WRITEBACK=y
+          CONFIG_ZRAM_MEMORY_TRACKING=y
+          EOF
+      - name: ⚙️ Apply Fengchi (HMBIRD) SCHED Patch
+        if: inputs.fengchi
+        run: |
+          cd kernel_workspace/common
+          if [ -d "kernel/sched/hmbird" ]; then
+            echo "✅ Fengchi already natively built into this kernel version!"
+          else
+            echo "⬇️ Fetching Fengchi patch for SM8750..."
+            git clone https://github.com/Numbersf/SCHED_PATCH.git -b "sm8750" /tmp/sched_patch
+            PATCH_FILE="/tmp/sched_patch/fengchi_oneplus_13_b.patch"
+            if [[ -f "$PATCH_FILE" ]]; then
+              cp "$PATCH_FILE" ./
+              dos2unix fengchi_oneplus_13_b.patch
+              patch -p1 -F 3 < fengchi_oneplus_13_b.patch
+              echo "✅ Fengchi patch applied!"
+            else
+              sed -i '1iobj-y += hmbird_patch.o' drivers/Makefile
+              wget -q https://github.com/Numbersf/Action-Build/raw/SukiSU-Ultra/patches/hmbird_patch.patch
+              patch -p1 -F 3 < hmbird_patch.patch
+              echo "✅ OGKI to GKI patch applied!"
+            fi
+          fi
+          cat >> arch/arm64/configs/gki_defconfig << 'EOF'
+          CONFIG_SCHED_CLASS_EXT=y
+          CONFIG_OPLUS_FEATURE_HMBIRD_BOOST=y
+          CONFIG_OPLUS_FEATURE_HMBIRD_SCHED=y
+          EOF
+      - name: Configure SchedUtil Optimizations
+        if: inputs.schedutil_opt
+        working-directory: kernel_workspace
+        run: |
+          cat >> common/arch/arm64/configs/gki_defconfig << 'EOF'
+          CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
+          CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
+          EOF
+          SU_C="common/kernel/sched/cpufreq_schedutil.c"
+          if [ -f "$SU_C" ]; then
+            sed -i 's/LATENCY_MULTIPLIER\s*=\s*1000/LATENCY_MULTIPLIER = 1000/' "$SU_C" 2>/dev/null || true
+          fi
+      - name: Prepare CPU Optimizations (Oryon SM8750)
+        if: inputs.cpu_opt
+        run: |
+          if [[ "${{ github.event.inputs.clang_version }}" == "clang18" ]]; then
+            echo "EXTRA_CFLAGS=-march=armv9-a+crypto+dotprod" >> $GITHUB_ENV
+          else
+            echo "EXTRA_CFLAGS=-mcpu=oryon-1 -fno-strict-aliasing -fno-delete-null-pointer-checks" >> $GITHUB_ENV
+          fi
+          cd kernel_workspace/common
+          cat >> arch/arm64/configs/gki_defconfig << 'EOF'
+          CONFIG_ARM64_ERRATUM_2658417=y
+          CONFIG_ARCH_QCOM=y
+          CONFIG_HZ_300=y
+          CONFIG_PREEMPT=y
+          CONFIG_NO_HZ_IDLE=y
+          EOF
+          echo "✅ Oryon flags prepared."
+      - name: Apply Unicode Bypass Fix
+        working-directory: kernel_workspace/common
+        run: |
+          PATCH_URL="https://github.com/palazik/kernel_patches/raw/main/common/unicode_bypass_fix_6.1+.patch"
+          wget -qO /tmp/ub_fix.patch "$PATCH_URL" 2>/dev/null && \
+            patch -p1 --forward < /tmp/ub_fix.patch || true
+          echo "Unicode fix applied"
+      - name: Apply BORE Scheduler
+        if: inputs.bore_enable
+        working-directory: kernel_workspace/common
+        run: |
+          echo "CONFIG_SCHED_BORE=y" >> arch/arm64/configs/gki_defconfig
+          BORE_URL="https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/patches/bore.patch"
+          wget -qO /tmp/bore.patch "$BORE_URL"
+          patch -p1 -F 3 < /tmp/bore.patch
+          echo "✅ BORE scheduler applied"
+      - name: Apply Memory & Scheduler Optimization Patches
+        if: inputs.mem_opt_patches
+        working-directory: kernel_workspace/common
+        run: |
+          echo "Applying WildKernels optimization patches..."
+          PATCHES_DIR="../wildkernels_patches/common"
+          apply_patch() {
+            local patch="$1"
+            if [ -f "$PATCHES_DIR/$patch" ]; then
+              patch -p1 --forward < "$PATCHES_DIR/$patch" && \
+                echo "✅ $patch" || echo "⚠️ $patch (skipped/conflict)"
+            else
+              echo "⚠️ $patch not found, skipping"
+            fi
+          }
+          apply_patch "optimized_mem_operations.patch"
+          apply_patch "file_struct_8bytes_align.patch"
+          apply_patch "reduce_cache_pressure.patch"
+          apply_patch "mem_opt_prefetch.patch"
+          apply_patch "optimise_memcmp.patch"
+          apply_patch "minimise_wakeup_time.patch"
+          apply_patch "int_sqrt.patch"
+          apply_patch "force_tcp_nodelay.patch"
+          apply_patch "reduce_gc_thread_sleep_time.patch"
+          apply_patch "add_timeout_wakelocks_globally.patch"
+          apply_patch "f2fs_reduce_congestion.patch"
+          apply_patch "reduce_freeze_timeout.patch"
+          apply_patch "clear_page_16bytes_align.patch"
+          apply_patch "add_limitation_scaling_min_freq.patch"
+          apply_patch "re_write_limitation_scaling_min_freq.patch"
+          apply_patch "adjust_cpu_scan_order.patch"
+          apply_patch "avoid_extra_s2idle_wake_attempts.patch"
+          apply_patch "disable_cache_hot_buddy.patch"
+          apply_patch "f2fs_enlarge_min_fsync_blocks.patch"
+          apply_patch "increase_ext4_default_commit_age.patch"
+          apply_patch "increase_sk_mem_packets.patch"
+          apply_patch "reduce_pci_pme_wakeups.patch"
+          apply_patch "silence_irq_cpu_logspam.patch"
+          apply_patch "silence_system_logspam.patch"
+          apply_patch "use_unlikely_wrap_cpufreq.patch"
+          echo "✅ Optimization patches applied"
+      - name: Apply NTSync Patch
+        if: inputs.ntsync_enable
+        working-directory: kernel_workspace/common
+        run: |
+          echo "Enabling NTSync (NT kernel sync primitives)..."
+          NTSYNC_DIR="../wildkernels_patches/common/ntsync"
+          NTSYNC_PATCH=""
+          for candidate in \
+            "$NTSYNC_DIR/ntsync_compat_android15-6.6.patch" \
+            "$NTSYNC_DIR/ntsync_compat_android15-6.6_OOS16.patch" \
+            "$NTSYNC_DIR/ntsync_compat_android15-6.6_OOS15.patch"; do
+            if [ -f "$candidate" ]; then
+              NTSYNC_PATCH="$candidate"
+              break
+            fi
+          done
+          if [ -z "$NTSYNC_PATCH" ]; then
+            echo "⚠️ NTSync compat patch for android15-6.6 not found in wildkernels_patches."
+            echo "   Falling back to upstream ntsync driver (mainline backport)..."
+            if [ -f "$NTSYNC_DIR/ntsync_base.patch" ]; then
+              patch -p1 --forward < "$NTSYNC_DIR/ntsync_base.patch" || true
+            else
+              echo "::warning::NTSync base patch also not found. Skipping NTSync."
+              exit 0
+            fi
+          else
+            echo "Using: $(basename $NTSYNC_PATCH)"
+            patch -p1 --forward < "$NTSYNC_PATCH" || true
+            if [ -f "$NTSYNC_DIR/ntsync_base.patch" ]; then
+              patch -p1 --forward < "$NTSYNC_DIR/ntsync_base.patch" || true
+            fi
+          fi
+          echo "CONFIG_NTSYNC=y" >> arch/arm64/configs/gki_defconfig
+          echo "✅ NTSync enabled"
+      - name: Add Droidspaces Support
+        if: inputs.droidspaces_enable
+        working-directory: kernel_workspace/common
+        run: |
+          echo "Enabling Droidspaces (portable Linux containers)..."
+          DS_DIR="../wildkernels_patches/common/droidspaces"
+          if [ -f "$DS_DIR/fix_sysvipc_kabi_6_7_8.patch" ]; then
+            patch -p1 --forward < "$DS_DIR/fix_sysvipc_kabi_6_7_8.patch" || true
+          else
+            echo "⚠️ fix_sysvipc_kabi_6_7_8.patch not found, skipping KABI fix"
+          fi
+          if [ -f "$DS_DIR/0001-Return-ghost-task-if-task-is-null-and-is-requested-b.patch" ]; then
+            patch -p1 --forward < "$DS_DIR/0001-Return-ghost-task-if-task-is-null-and-is-requested-b.p
