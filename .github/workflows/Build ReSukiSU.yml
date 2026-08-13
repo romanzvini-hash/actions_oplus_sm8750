@@ -166,14 +166,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: kernel_workspace/zyc-clang
-          key: zyc-clang-19.0.0git-20240723
+          key: zyc-clang-19.0.0git-20240723-forcemiss-test1
 
       - name: Cache build-tools
         id: buildtools-cache
         uses: actions/cache@v4
         with:
           path: kernel_workspace/build-tools
-          key: codelinaro-build-tools-ks-kernel-lnx-4.0
+          key: codelinaro-build-tools-ks-kernel-lnx-4.0-forcemiss-test1
 
       - name: Install dependencies & Init Source
         run: |
@@ -238,7 +238,7 @@ jobs:
         id: ecs-cache
         with:
           path: /tmp/ccache-ecs-bin
-          key: ccache-ecs-${{ runner.os }}-084a7620
+          key: ccache-ecs-${{ runner.os }}-084a7620-forcemiss-test1
 
       - name: Build & Install ccache-ECS
         run: |
@@ -263,7 +263,7 @@ jobs:
         if: always()
         with:
           path: /tmp/ccache-ecs-bin
-          key: ccache-ecs-${{ runner.os }}-084a7620
+          key: ccache-ecs-${{ runner.os }}-084a7620-forcemiss-test1
 
       - name: Configure CCache Directory
         run: |
@@ -280,7 +280,7 @@ jobs:
         id: ccache-restore
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-forcemiss-test1
           restore-keys: |
             ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }}-
             ${{ env.CCACHE_KEY }}-${{ runner.os }}-
@@ -291,7 +291,7 @@ jobs:
         if: inputs.lto_type == 'thin'
         with:
           path: ${{ env.LDCACHE_DIR }}
-          key: lto-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: lto-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-forcemiss-test1
           restore-keys: |
             lto-cache-${{ runner.os }}-${{ github.ref_name }}-
 
@@ -941,14 +941,14 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-neov4-6.6.142-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: ccache-neov4-6.6.142-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-forcemiss-test1
 
       - name: 📦 Save LTO CCache
         if: success() && inputs.lto_type == 'thin'
         uses: actions/cache/save@v4
         with:
           path: ${{ env.LDCACHE_DIR }}
-          key: lto-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          key: lto-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-forcemiss-test1
           
       - name: 🧠 Package AK3 ZIP
         id: create_zip
