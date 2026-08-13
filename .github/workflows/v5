@@ -1,0 +1,15 @@
+name: ReSukiSU OP13 Build by skinga49
+on:
+  workflow_dispatch:
+    inputs:
+      lto_type:
+        description: 'LTO Optimization (none, thin, full)'
+        required: true
+        default: 'none'
+        type: string
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Проверка LTO
+        run: echo "LTO = ${{ github.event.inputs.lto_type }}"
