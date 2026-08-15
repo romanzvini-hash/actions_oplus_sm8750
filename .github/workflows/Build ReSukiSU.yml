@@ -1232,7 +1232,7 @@ jobs:
 
       - name: Set Environment Variables
         run: |
-          FULL_VERSION=6.6.142-palaziks-ShiftPorts
+          FULL_VERSION=6.6.142-Skinger49
           echo "FULL_VERSION=$FULL_VERSION" >> $GITHUB_ENV
           TIME="$(TZ='Asia/Shanghai' date +'%y%m%d%H%M%S')"
           TIME_FORM="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
